@@ -140,24 +140,43 @@ exports.licenseLogin = async (req, res) => {
 // 🔐 ADMIN LOGIN
 exports.adminLogin = async (req, res) => {
   const { username, password } = req.body;
-
+  console.log(req.body);
   try {
     const user = await User.findOne({ username, role: "admin" });
-    if (!user)
-      return res
-        .status(403)
-        .json({ success: false, message: "Admin not found" });
+    if (!user) {
+      return res.status(403).json({
+        success: false,
+        message: "Admin not found or invalid credentials",
+      });
+    }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
-      return res
-        .status(400)
-        .json({ success: false, message: "Wrong password" });
+    const isMatch = bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: "Wrong password",
+      });
+    }
 
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, {
-      expiresIn: "6h",
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        role: user.role,
+      },
+      JWT_SECRET,
+      {
+        expiresIn: "6h",
+      }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        username: user.username,
+        role: user.role,
+      },
     });
-    res.json({ success: true, token, user });
   } catch (err) {
     console.error("❌ Admin login error:", err);
     res.status(500).json({ success: false, message: "Server error" });

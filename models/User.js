@@ -5,6 +5,7 @@ const UserSchema = new mongoose.Schema({
   password: String,
   hwid: String,
   appId: String,
+  role: { type: String, default: "user" },
   subscriptions: [
     {
       level: String,
