@@ -3,8 +3,14 @@ const License = require("../models/License");
 const App = require("../models/App");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Generate HMAC signature for response
+const generateSignature = (responseBody, secret) => {
+  return crypto.createHmac("sha256", secret).update(responseBody).digest("hex");
+};
 
 // 🔐 REGISTER
 exports.register = async (req, res) => {
@@ -163,52 +169,84 @@ exports.logout = async (req, res) => {
   res.json({ success: true, message: "Logged out" });
 };
 
-// 🔐 KeyAuth-Style Login for External Clients (reads 'pass' not 'password')
+// 🔐 KeyAuth-Style Login for External Clients
 exports.keyAuthLogin = async (req, res) => {
-  const { username, pass, hwid, name, ownerid } = req.body;
+  const { username, pass, hwid, name, ownerid, version } = req.body;
 
   try {
-    const app = await App.findOne({ name, ownerId: ownerid });
-    if (!app)
-      return res.status(400).json({ success: false, message: "App not found" });
-
-    const user = await User.findOne({ username, appId: app._id });
-    if (!user)
-      return res
-        .status(400)
-        .json({ success: false, message: "User not found" });
-
-    const isMatch = await bcrypt.compare(pass, user.password);
-    if (!isMatch)
-      return res
-        .status(400)
-        .json({ success: false, message: "Wrong password" });
-
-    if (user.hwid && user.hwid !== hwid) {
-      return res.status(403).json({ success: false, message: "HWID mismatch" });
+    const app = await App.findOne({ name, ownerId: ownerid, version });
+    if (!app) {
+      const responseBody = { success: false, message: "App not found" };
+      res.setHeader(
+        "signature",
+        generateSignature(JSON.stringify(responseBody), "fallback-secret")
+      );
+      return res.status(400).json(responseBody);
     }
 
-    return res.json({
+    const user = await User.findOne({ username, appId: app._id });
+    if (!user) {
+      const responseBody = { success: false, message: "User not found" };
+      res.setHeader(
+        "signature",
+        generateSignature(JSON.stringify(responseBody), app.secret)
+      );
+      return res.status(400).json(responseBody);
+    }
+
+    const isMatch = await bcrypt.compare(pass, user.password);
+    if (!isMatch) {
+      const responseBody = { success: false, message: "Wrong password" };
+      res.setHeader(
+        "signature",
+        generateSignature(JSON.stringify(responseBody), app.secret)
+      );
+      return res.status(400).json(responseBody);
+    }
+
+    if (user.hwid && hwid && user.hwid !== hwid) {
+      const responseBody = { success: false, message: "HWID mismatch" };
+      res.setHeader(
+        "signature",
+        generateSignature(JSON.stringify(responseBody), app.secret)
+      );
+      return res.status(403).json(responseBody);
+    }
+
+    const responseBody = {
       success: true,
       message: "Logged in",
       info: {
         username: user.username,
         subscriptions: user.subscriptions,
+        ip: req.ip,
+        hwid: user.hwid,
+        createdate: user.createdAt,
+        lastlogin: new Date(),
       },
-    });
+    };
+
+    res.setHeader(
+      "signature",
+      generateSignature(JSON.stringify(responseBody), app.secret)
+    );
+    res.json(responseBody);
   } catch (err) {
     console.error("💥 Login error:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    const responseBody = { success: false, message: "Server error" };
+    res.setHeader(
+      "signature",
+      generateSignature(JSON.stringify(responseBody), app.secret)
+    );
+    res.status(500).json(responseBody);
   }
 };
 
 // Example admin-only action
 exports.someAdminAction = async (req, res) => {
-  const { username } = req.body; // or req.user.username if using JWT
+  const { username } = req.body;
 
   const user = await User.findOne({ username });
   if (!user || user.role !== "admin")
     return res.status(403).json({ success: false, message: "Admin only" });
-
-  // ...rest of your admin logic...
 };
